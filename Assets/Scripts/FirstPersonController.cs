@@ -44,9 +44,6 @@ public class FirstPersonController : MonoBehaviour
 
     private void Awake()
     {
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-
         characterController = GetComponent<CharacterController>();
         mainCamera = Camera.main;
 
@@ -60,6 +57,12 @@ public class FirstPersonController : MonoBehaviour
 
         lookAction.performed += context => lookInput = context.ReadValue<Vector2>();
         lookAction.canceled += context => lookInput = Vector2.zero;
+    }
+
+    private void Start()
+    {
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
 
     private void OnEnable()
@@ -82,6 +85,7 @@ public class FirstPersonController : MonoBehaviour
     {
         HandleMovement();
         HandleRotation();
+        HandleFootsteps();
     }
 
     void HandleMovement()
