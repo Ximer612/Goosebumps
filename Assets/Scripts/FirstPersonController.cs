@@ -25,6 +25,16 @@ public class FirstPersonController : MonoBehaviour
     [SerializeField] private float crouchSpeedMultiplier = 0.1f;
     [SerializeField] private bool isCrouching => standingHeight - currentHeight > .1f;
 
+    [Header("Pickup Interaction")]
+    [SerializeField] private Transform objectHoldPoint;
+    [SerializeField] private float lerpSpeed = 5.0f;
+    private GameObject pickedUpObject;
+    private Vector3 objectOriginalPosition;
+    private Quaternion objectOriginalRotation;
+    private bool isObjectPickedUp = false;
+    private bool isInteracting = false;
+    private bool isRotatingObject = false;
+
     [Header("FootStep Sounds")]
     [SerializeField] private AudioSource footstepSource;
     [SerializeField] private AudioClip[] footstepSounds;
@@ -49,6 +59,9 @@ public class FirstPersonController : MonoBehaviour
     private InputAction jumpAction;
     private InputAction sprintAction;
     private InputAction crouchAction;
+    private InputAction interactAction;
+    private InputAction releaseAction;
+    private InputAction rotateObjectAction;
     private Vector2 moveInput;
     private Vector2 lookInput;
 
@@ -63,6 +76,9 @@ public class FirstPersonController : MonoBehaviour
         jumpAction = PlayerControls.FindActionMap("Player").FindAction("Jump");
         sprintAction = PlayerControls.FindActionMap("Player").FindAction("Sprint");
         crouchAction = PlayerControls.FindActionMap("Player").FindAction("Crouch");
+        interactAction = PlayerControls.FindActionMap("Player").FindAction("Interact");
+        releaseAction = PlayerControls.FindActionMap("Player").FindAction("Release");
+        rotateObjectAction = PlayerControls.FindActionMap("Player").FindAction("RotateObject");
 
         initialCameraPosition = mainCamera.transform.localPosition;
         currentHeight = characterController.height;
@@ -88,6 +104,13 @@ public class FirstPersonController : MonoBehaviour
         jumpAction.Enable();
         sprintAction.Enable();
         crouchAction.Enable();
+        interactAction.Enable();
+        releaseAction.Enable();
+        rotateObjectAction.Enable();
+        interactAction.performed += HandleInteract;
+        releaseAction.performed += HandleRelease;
+        rotateObjectAction.performed += StartRotatingObject;
+        rotateObjectAction.canceled += StopRotatingObject;
     }
 
     private void OnDisable()
@@ -97,6 +120,13 @@ public class FirstPersonController : MonoBehaviour
         jumpAction.Disable();
         sprintAction.Disable();
         crouchAction.Disable();
+        interactAction.Disable();
+        releaseAction.Disable();
+        rotateObjectAction.Disable();
+        interactAction.performed -= HandleInteract;
+        releaseAction.performed -= HandleRelease;
+        rotateObjectAction.performed -= StartRotatingObject;
+        rotateObjectAction.canceled -= StopRotatingObject;
     }
 
     private void Update()
@@ -105,10 +135,14 @@ public class FirstPersonController : MonoBehaviour
         HandleRotation();
         HandleCrouch();
         HandleFootsteps();
+        HandleItemRotation();
+        CheckObjectPickedUp();
     }
 
     void HandleMovement()
     {
+        if (isInteracting) return;
+
         float speedMultiplier = sprintAction.ReadValue<float>() > 0 ? sprintMultiplier : 1f;
         float crouchMultiplier = crouchAction.ReadValue<float>() > 0 ? crouchSpeedMultiplier : 1f;
         float verticalSpeed = moveInput.y * walkSpeed * speedMultiplier * crouchMultiplier;
@@ -162,6 +196,8 @@ public class FirstPersonController : MonoBehaviour
 
     void HandleRotation()
     {
+        if (isInteracting) return;
+
         float mouseXRotation = lookInput.x * mouseSensitivity;
         transform.Rotate(0, mouseXRotation, 0);
 
@@ -220,5 +256,89 @@ public class FirstPersonController : MonoBehaviour
             currentMovement.y -= gravity * Time.deltaTime;
         }
 
+    }
+
+    private void HandleInteract(InputAction.CallbackContext context)
+    {
+        if (isObjectPickedUp) return; // Se un oggetto è già raccolto, ignora
+
+        Ray ray = new Ray(mainCamera.transform.position, mainCamera.transform.forward);
+        if (Physics.Raycast(ray, out RaycastHit hit, 3f))
+        {
+            if (hit.collider.CompareTag("CanPickUp"))
+            {
+                pickedUpObject = hit.collider.gameObject;
+                objectOriginalPosition = pickedUpObject.transform.position;
+                objectOriginalRotation = pickedUpObject.transform.rotation;
+                isObjectPickedUp = true;
+                isInteracting = true;
+            }
+        }
+    }
+
+    private void HandleRelease(InputAction.CallbackContext context)
+    {
+        isInteracting = false;
+
+        if (!isObjectPickedUp || pickedUpObject == null) return;
+
+        // Ritorna l'oggetto alla posizione originale
+        isObjectPickedUp = false;
+        StartCoroutine(ReturnObjectToOriginalPosition());
+    }
+
+    private void MoveObjectToHoldPoint()
+    {
+        if (pickedUpObject == null) return;
+
+        pickedUpObject.transform.position = Vector3.Lerp(pickedUpObject.transform.position, objectHoldPoint.position, Time.deltaTime * lerpSpeed);
+        pickedUpObject.transform.rotation = Quaternion.Lerp(pickedUpObject.transform.rotation, objectHoldPoint.rotation, Time.deltaTime * lerpSpeed);
+    }
+
+    private System.Collections.IEnumerator ReturnObjectToOriginalPosition()
+    {
+        while (Vector3.Distance(pickedUpObject.transform.position, objectOriginalPosition) > 0.01f)
+        {
+            pickedUpObject.transform.position = Vector3.Lerp(pickedUpObject.transform.position, objectOriginalPosition, Time.deltaTime * lerpSpeed);
+            pickedUpObject.transform.rotation = Quaternion.Lerp(pickedUpObject.transform.rotation, objectOriginalRotation, Time.deltaTime * lerpSpeed);
+            yield return null;
+        }
+        pickedUpObject = null;
+    }
+
+    private void CheckObjectPickedUp()
+    {
+        if (isObjectPickedUp && pickedUpObject)
+        {
+            MoveObjectToHoldPoint();
+        }
+    }
+
+    private void StartRotatingObject(InputAction.CallbackContext context)
+    {
+        if (isObjectPickedUp) // Assicurati che un oggetto sia stato raccolto
+        {
+            isRotatingObject = true;
+            Cursor.lockState = CursorLockMode.None; // Sblocca il mouse
+        }
+    }
+
+    private void StopRotatingObject(InputAction.CallbackContext context)
+    {
+        isRotatingObject = false;
+        Cursor.lockState = CursorLockMode.Locked; // Rilocka il mouse
+    }
+
+    private void HandleItemRotation()
+    {
+        if (isRotatingObject && pickedUpObject != null)
+        {
+            float rotateX = lookInput.x; // Movimento orizzontale del mouse
+            float rotateY = lookInput.y; // Movimento verticale del mouse
+
+            // Rotazione attorno all'asse Y e X
+            pickedUpObject.transform.Rotate(Vector3.up, -rotateX * mouseSensitivity, Space.World);
+            pickedUpObject.transform.Rotate(Vector3.right, rotateY * mouseSensitivity, Space.World);
+        }
     }
 }
